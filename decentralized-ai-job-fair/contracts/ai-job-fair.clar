@@ -357,3 +357,117 @@
 (define-read-only (get-applicant-skill (applicant principal) (skill (string-ascii 50)))
     (ok (map-get? applicant-skills { applicant: applicant, skill: skill }))
 )
+
+;; Platform fee management
+(define-data-var platform-fee-percentage uint u5)
+(define-data-var total-fees-collected uint u0)
+
+(define-public (set-platform-fee (new-fee uint))
+    (begin
+        (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+        (asserts! (<= new-fee u20) (err u107))
+        (var-set platform-fee-percentage new-fee)
+        (ok true)
+    )
+)
+
+(define-read-only (get-platform-fee)
+    (ok (var-get platform-fee-percentage))
+)
+
+(define-read-only (get-total-fees-collected)
+    (ok (var-get total-fees-collected))
+)
+
+(define-public (collect-platform-fee (application-id uint))
+    (let
+        (
+            (application (unwrap! (map-get? applications { application-id: application-id }) err-not-found))
+            (job (unwrap! (map-get? job-postings { job-id: (get job-id application) }) err-not-found))
+            (fee-amount (/ (* (get bounty-amount job) (var-get platform-fee-percentage)) u100))
+        )
+        (asserts! (is-eq (get status application) "completed") err-invalid-status)
+        (try! (stx-transfer? fee-amount (get company job) contract-owner))
+        (var-set total-fees-collected (+ (var-get total-fees-collected) fee-amount))
+        (ok fee-amount)
+    )
+)
+
+;; Job categories
+(define-map job-categories
+    { job-id: uint }
+    { category: (string-ascii 50) }
+)
+
+;; #[allow(unchecked_data)]
+(define-public (set-job-category (job-id uint) (category (string-ascii 50)))
+    (let
+        (
+            (job (unwrap! (map-get? job-postings { job-id: job-id }) err-not-found))
+        )
+        (asserts! (is-eq (get company job) tx-sender) err-unauthorized)
+        (map-set job-categories
+            { job-id: job-id }
+            { category: category }
+        )
+        (ok true)
+    )
+)
+
+(define-read-only (get-job-category (job-id uint))
+    (ok (map-get? job-categories { job-id: job-id }))
+)
+
+;; Application notes
+(define-map application-notes
+    { application-id: uint }
+    { note: (string-ascii 500) }
+)
+
+;; #[allow(unchecked_data)]
+(define-public (add-application-note (application-id uint) (note (string-ascii 500)))
+    (let
+        (
+            (application (unwrap! (map-get? applications { application-id: application-id }) err-not-found))
+        )
+        (asserts! (is-eq (get applicant application) tx-sender) err-unauthorized)
+        (map-set application-notes
+            { application-id: application-id }
+            { note: note }
+        )
+        (ok true)
+    )
+)
+
+(define-read-only (get-application-note (application-id uint))
+    (ok (map-get? application-notes { application-id: application-id }))
+)
+
+;; Statistics tracking
+(define-data-var total-jobs-posted uint u0)
+(define-data-var total-applications-submitted uint u0)
+(define-data-var total-interviews-scheduled uint u0)
+(define-data-var total-hires-completed uint u0)
+
+(define-public (update-job-statistics)
+    (begin
+        (var-set total-jobs-posted (+ (var-get total-jobs-posted) u1))
+        (ok true)
+    )
+)
+
+(define-public (update-application-statistics)
+    (begin
+        (var-set total-applications-submitted (+ (var-get total-applications-submitted) u1))
+        (ok true)
+    )
+)
+
+(define-read-only (get-platform-statistics)
+    (ok {
+        total-jobs: (var-get total-jobs-posted),
+        total-applications: (var-get total-applications-submitted),
+        total-interviews: (var-get total-interviews-scheduled),
+        total-hires: (var-get total-hires-completed)
+    })
+)
