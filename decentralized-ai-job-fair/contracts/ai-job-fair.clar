@@ -237,3 +237,123 @@
         (ok true)
     )
 )
+
+;; Rating system
+(define-map company-ratings
+    { company: principal }
+    { total-score: uint, rating-count: uint }
+)
+
+(define-map applicant-ratings
+    { applicant: principal }
+    { total-score: uint, rating-count: uint }
+)
+
+(define-public (rate-company (job-id uint) (rating uint))
+    (let
+        (
+            (job (unwrap! (map-get? job-postings { job-id: job-id }) err-not-found))
+            (current-rating (default-to { total-score: u0, rating-count: u0 } 
+                (map-get? company-ratings { company: (get company job) })))
+        )
+        (asserts! (<= rating u5) (err u106))
+        (asserts! (>= rating u1) (err u106))
+        (map-set company-ratings
+            { company: (get company job) }
+            {
+                total-score: (+ (get total-score current-rating) rating),
+                rating-count: (+ (get rating-count current-rating) u1)
+            }
+        )
+        (ok true)
+    )
+)
+
+(define-public (rate-applicant (application-id uint) (rating uint))
+    (let
+        (
+            (application (unwrap! (map-get? applications { application-id: application-id }) err-not-found))
+            (job (unwrap! (map-get? job-postings { job-id: (get job-id application) }) err-not-found))
+            (current-rating (default-to { total-score: u0, rating-count: u0 } 
+                (map-get? applicant-ratings { applicant: (get applicant application) })))
+        )
+        (asserts! (is-eq (get company job) tx-sender) err-unauthorized)
+        (asserts! (<= rating u5) (err u106))
+        (asserts! (>= rating u1) (err u106))
+        (map-set applicant-ratings
+            { applicant: (get applicant application) }
+            {
+                total-score: (+ (get total-score current-rating) rating),
+                rating-count: (+ (get rating-count current-rating) u1)
+            }
+        )
+        (ok true)
+    )
+)
+
+(define-read-only (get-company-rating (company principal))
+    (ok (map-get? company-ratings { company: company }))
+)
+
+(define-read-only (get-applicant-rating (applicant principal))
+    (ok (map-get? applicant-ratings { applicant: applicant }))
+)
+
+;; Skills and categories
+(define-map job-skills
+    { job-id: uint, skill: (string-ascii 50) }
+    { required: bool }
+)
+
+(define-map applicant-skills
+    { applicant: principal, skill: (string-ascii 50) }
+    { verified: bool, endorsements: uint }
+)
+
+;; #[allow(unchecked_data)]
+(define-public (add-job-skill (job-id uint) (skill (string-ascii 50)))
+    (let
+        (
+            (job (unwrap! (map-get? job-postings { job-id: job-id }) err-not-found))
+        )
+        (asserts! (is-eq (get company job) tx-sender) err-unauthorized)
+        (map-set job-skills
+            { job-id: job-id, skill: skill }
+            { required: true }
+        )
+        (ok true)
+    )
+)
+
+;; #[allow(unchecked_data)]
+(define-public (add-applicant-skill (skill (string-ascii 50)))
+    (begin
+        (map-set applicant-skills
+            { applicant: tx-sender, skill: skill }
+            { verified: false, endorsements: u0 }
+        )
+        (ok true)
+    )
+)
+
+;; #[allow(unchecked_data)]
+(define-public (endorse-skill (applicant principal) (skill (string-ascii 50)))
+    (let
+        (
+            (skill-data (unwrap! (map-get? applicant-skills { applicant: applicant, skill: skill }) err-not-found))
+        )
+        (map-set applicant-skills
+            { applicant: applicant, skill: skill }
+            (merge skill-data { endorsements: (+ (get endorsements skill-data) u1) })
+        )
+        (ok true)
+    )
+)
+
+(define-read-only (get-job-skill (job-id uint) (skill (string-ascii 50)))
+    (ok (map-get? job-skills { job-id: job-id, skill: skill }))
+)
+
+(define-read-only (get-applicant-skill (applicant principal) (skill (string-ascii 50)))
+    (ok (map-get? applicant-skills { applicant: applicant, skill: skill }))
+)
