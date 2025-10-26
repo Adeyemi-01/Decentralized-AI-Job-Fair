@@ -105,3 +105,135 @@
         (ok new-application-id)
     )
 )
+
+;; #[allow(unchecked_data)]
+(define-public (schedule-interview (application-id uint) (escrow-amount uint))
+    (let
+        (
+            (application (unwrap! (map-get? applications { application-id: application-id }) err-not-found))
+            (job (unwrap! (map-get? job-postings { job-id: (get job-id application) }) err-not-found))
+        )
+        (asserts! (is-eq (get company job) tx-sender) err-unauthorized)
+        (asserts! (is-eq (get status application) "pending") err-invalid-status)
+        (try! (stx-transfer? escrow-amount tx-sender (as-contract tx-sender)))
+        (map-set applications
+            { application-id: application-id }
+            (merge application { status: "interviewing", interview-scheduled: true })
+        )
+        (map-set escrows
+            { application-id: application-id }
+            { amount: escrow-amount, released: false }
+        )
+        (ok true)
+    )
+)
+
+;; #[allow(unchecked_data)]
+(define-public (release-bounty (application-id uint))
+    (let
+        (
+            (application (unwrap! (map-get? applications { application-id: application-id }) err-not-found))
+            (job (unwrap! (map-get? job-postings { job-id: (get job-id application) }) err-not-found))
+            (escrow (unwrap! (map-get? escrows { application-id: application-id }) err-not-found))
+        )
+        (asserts! (is-eq (get company job) tx-sender) err-unauthorized)
+        (asserts! (not (get released escrow)) err-invalid-status)
+        (try! (as-contract (stx-transfer? (get amount escrow) tx-sender (get applicant application))))
+        (map-set escrows
+            { application-id: application-id }
+            (merge escrow { released: true })
+        )
+        (map-set applications
+            { application-id: application-id }
+            (merge application { status: "completed" })
+        )
+        (ok true)
+    )
+)
+
+;; #[allow(unchecked_data)]
+(define-public (reject-application (application-id uint))
+    (let
+        (
+            (application (unwrap! (map-get? applications { application-id: application-id }) err-not-found))
+            (job (unwrap! (map-get? job-postings { job-id: (get job-id application) }) err-not-found))
+        )
+        (asserts! (is-eq (get company job) tx-sender) err-unauthorized)
+        (asserts! (is-eq (get status application) "pending") err-invalid-status)
+        (map-set applications
+            { application-id: application-id }
+            (merge application { status: "rejected" })
+        )
+        (ok true)
+    )
+)
+
+;; #[allow(unchecked_data)]
+(define-public (withdraw-application (application-id uint))
+    (let
+        (
+            (application (unwrap! (map-get? applications { application-id: application-id }) err-not-found))
+        )
+        (asserts! (is-eq (get applicant application) tx-sender) err-unauthorized)
+        (asserts! (is-eq (get status application) "pending") err-invalid-status)
+        (map-set applications
+            { application-id: application-id }
+            (merge application { status: "withdrawn" })
+        )
+        (ok true)
+    )
+)
+
+;; #[allow(unchecked_data)]
+(define-public (cancel-job (job-id uint))
+    (let
+        (
+            (job (unwrap! (map-get? job-postings { job-id: job-id }) err-not-found))
+        )
+        (asserts! (is-eq (get company job) tx-sender) err-unauthorized)
+        (asserts! (is-eq (get status job) "active") err-invalid-status)
+        (asserts! (is-eq (get applications-count job) u0) (err u105))
+        (try! (as-contract (stx-transfer? (get bounty-amount job) tx-sender (get company job))))
+        (map-set job-postings
+            { job-id: job-id }
+            (merge job { status: "cancelled" })
+        )
+        (ok true)
+    )
+)
+
+;; #[allow(unchecked_data)]
+(define-public (close-job (job-id uint))
+    (let
+        (
+            (job (unwrap! (map-get? job-postings { job-id: job-id }) err-not-found))
+        )
+        (asserts! (is-eq (get company job) tx-sender) err-unauthorized)
+        (asserts! (is-eq (get status job) "active") err-invalid-status)
+        (map-set job-postings
+            { job-id: job-id }
+            (merge job { status: "closed" })
+        )
+        (ok true)
+    )
+)
+
+;; #[allow(unchecked_data)]
+(define-public (refund-escrow (application-id uint))
+    (let
+        (
+            (application (unwrap! (map-get? applications { application-id: application-id }) err-not-found))
+            (job (unwrap! (map-get? job-postings { job-id: (get job-id application) }) err-not-found))
+            (escrow (unwrap! (map-get? escrows { application-id: application-id }) err-not-found))
+        )
+        (asserts! (is-eq (get company job) tx-sender) err-unauthorized)
+        (asserts! (not (get released escrow)) err-invalid-status)
+        (asserts! (or (is-eq (get status application) "rejected") (is-eq (get status application) "withdrawn")) err-invalid-status)
+        (try! (as-contract (stx-transfer? (get amount escrow) tx-sender (get company job))))
+        (map-set escrows
+            { application-id: application-id }
+            (merge escrow { released: true })
+        )
+        (ok true)
+    )
+)
